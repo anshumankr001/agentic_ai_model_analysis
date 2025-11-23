@@ -55,8 +55,8 @@ def generate_random_cumulative_pnl(
 if __name__ == "__main__":
     pnl = generate_random_cumulative_pnl(
         num_days=2609,
-        daily_pnl_pct_mean=0.05,
-        daily_pnl_pct_std=2.0,
+        daily_pnl_pct_mean=0.5,
+        daily_pnl_pct_std=3.0,
         start_date="2015-01-01",
         seed=43,
     )
