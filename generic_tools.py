@@ -1,82 +1,75 @@
 import json
-from typing import Any, Dict
+import pandas as pd
 from random_pnl_generator import generate_random_cumulative_pnl
 
-import numpy as np
-import pandas as pd
-
-Number = float | int
-JSONType = dict[str, str | Number | dict]
-
-TRADING_DAYS_PER_YEAR = 261
+INITIAL_CAPITAL = 100_000.0
 
 def _ensure_pnl_data() -> pd.DataFrame:
     return generate_random_cumulative_pnl(
-        num_days=2609,
-        daily_pnl_pct_mean=0.5,
-        daily_pnl_pct_std=4.0,
+        num_days=252 * 3,
+        daily_pnl_pct_mean=0.05,
+        daily_pnl_pct_std=2.0,
         start_date="2015-01-01",
         seed=43,
     )
 
+
 def generate_top_level_summary(
     pnl_data: pd.DataFrame | None = None,
     pnl_column: str = "PnL",
-    initial_capital: float = 100_000.0,
+    initial_capital: float = INITIAL_CAPITAL,
     risk_free_rate: float = 0.02,
-) -> JSONType:
-
+) -> str:
     if pnl_data is None:
         pnl_data = _ensure_pnl_data()
 
-    pnl_series = pnl_data[pnl_column].astype(float).sort_index()
+    if pnl_column not in pnl_data.columns:
+        raise ValueError(f"Column '{pnl_column}' not found in pnl_data.")
 
-    trading_days: int = len(pnl_series)
+    cumulative_returns = pnl_data[pnl_column].astype(float)
+    trading_days = int(len(cumulative_returns))
     if trading_days == 0:
-        raise ValueError("PnL series is empty.")
+        raise ValueError("pnl_data is empty.")
 
-    years: float = trading_days / TRADING_DAYS_PER_YEAR
+    daily_returns = cumulative_returns.diff().fillna(cumulative_returns.iloc[0])
+    years = trading_days / 252.0
+
+    total_return_pct = float(cumulative_returns.iloc[-1] * 100.0)
+
+    portfolio_values: pd.Series = (initial_capital * (1.0 + cumulative_returns))  # type: ignore[assignment]
+    final_value = float(portfolio_values.iloc[-1])
+    total_pnl = float(final_value - initial_capital)
+
+    mean_daily_return = float(daily_returns.mean())
+    vol_daily = float(daily_returns.std(ddof=1))
+    annualized_return = float(((1.0 + mean_daily_return) ** 252.0 - 1.0) * 100.0)
+    annualized_vol = float(vol_daily * (252.0 ** 0.5) * 100.0)
+
+    rf_daily = risk_free_rate / 252.0
+    excess_daily = daily_returns - rf_daily
+    excess_vol = float(excess_daily.std(ddof=1))
+    sharpe_ratio = float(
+        (excess_daily.mean() / excess_vol * (252.0 ** 0.5)) if excess_vol > 0 else 0.0
+    )
+
+    running_max = portfolio_values.cummax()
+    drawdowns = portfolio_values / running_max - 1.0
+    max_drawdown_pct = float(drawdowns.min() * 100.0)
+
+    positive_days = int((daily_returns > 0.0).sum())
+    win_rate_pct = float(positive_days / trading_days * 100.0)
+
+    best_day_pct = float(daily_returns.max() * 100.0)
+    worst_day_pct = float(daily_returns.min() * 100.0)
+
+    skew_value = float(daily_returns.skew())
+    kurtosis_value = float(daily_returns.kurtosis())
 
     # Index is DatetimeIndex from generate_random_cumulative_pnl
-    start_date: str = str(pd.Timestamp(pnl_series.index[0]).date())  # type: ignore[arg-type]
-    end_date: str = str(pd.Timestamp(pnl_series.index[-1]).date())  # type: ignore[arg-type]
+    start_date = str(pd.Timestamp(pnl_data.index[0]).date())  # type: ignore[arg-type]
+    end_date = str(pd.Timestamp(pnl_data.index[-1]).date())  # type: ignore[arg-type]
 
-    total_return_pct: float = float(pnl_series.iloc[-1] - pnl_series.iloc[0])
-    annualized_return_pct: float = (
-        total_return_pct / years if years > 0 else float("nan")
-    )
-
-    daily_pct = pnl_series.diff().fillna(pnl_series.iloc[0])
-    daily_values = daily_pct.to_numpy(dtype=float)
-
-    annualized_vol_pct: float = float(
-        daily_values.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)
-    )
-
-    excess_daily = daily_values - (risk_free_rate / TRADING_DAYS_PER_YEAR * 100.0)
-    sharpe_ratio: float = (
-        float(excess_daily.mean() / excess_daily.std(ddof=1))
-        if excess_daily.std(ddof=1) > 0
-        else float("nan")
-    )
-
-    running_max = pnl_series.cummax()
-    drawdowns = pnl_series - running_max
-    max_drawdown_pct: float = float(drawdowns.min())
-
-    wins: int = int((daily_values > 0).sum())
-    win_rate_pct: float = float(wins / trading_days * 100.0)
-
-    best_day_pct: float = float(daily_pct.max())
-    worst_day_pct: float = float(daily_pct.min())
-
-    skewness: float = float(daily_pct.skew())
-    kurtosis: float = float(daily_pct.kurtosis())
-
-    final_value: float = float(initial_capital * (1.0 + total_return_pct / 100.0))
-    total_pnl_amount: float = float(final_value - initial_capital)
-
-    return {
+    stats: dict[str, object] = {
         "backtest_period": {
             "trading_days": trading_days,
             "years": round(years, 2),
@@ -86,12 +79,12 @@ def generate_top_level_summary(
         "capital": {
             "initial_capital": initial_capital,
             "final_value": round(final_value, 2),
-            "total_pnl_amount": round(total_pnl_amount, 2),
-            "total_return_pct": round(total_return_pct, 2),
+            "total_pnl": round(total_pnl, 2),
         },
         "performance": {
-            "annualized_return_pct": round(annualized_return_pct, 2),
-            "annualized_volatility_pct": round(annualized_vol_pct, 2),
+            "total_return_pct": round(total_return_pct, 2),
+            "annualized_return_pct": round(annualized_return, 2),
+            "annualized_volatility_pct": round(annualized_vol, 2),
             "sharpe_ratio": round(sharpe_ratio, 2),
         },
         "risk": {
@@ -103,10 +96,12 @@ def generate_top_level_summary(
             "worst_day_pct": round(worst_day_pct, 2),
         },
         "distribution": {
-            "skewness": round(skewness, 2),
-            "kurtosis": round(kurtosis, 2),
+            "skewness": round(skew_value, 2),
+            "kurtosis": round(kurtosis_value, 2),
         },
     }
+
+    return json.dumps(stats, indent=2)
 
 # Example usage
 if __name__ == "__main__":
