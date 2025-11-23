@@ -1,0 +1,15 @@
+{
+    "pythonVersion": "3.13",
+    "pythonPlatform": "Windows",
+    "executionEnvironments": [
+        {
+            "root": ".",
+            "pythonVersion": "3.13",
+            "pythonPlatform": "Windows",
+            "extraPaths": [
+                "C:\\Users\\anshu\\AppData\\Roaming\\Python\\Python313\\site-packages"
+            ]
+        }
+    ]
+}
+
